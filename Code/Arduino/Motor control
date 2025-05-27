@@ -1,0 +1,142 @@
+#define PI 3.14159265358979323846264338327950288419716939937510 
+#include <Servo.h>
+
+// Serial Setup
+int16_t data[6] = {0,0,0,0,0,0}; 
+int16_t motor_joints[6] = {0,0,0,0,0,0}; 
+uint16_t motor_pwm[6] = {0,0,0,0,0,0}; 
+int16_t offsets[6] = {0,-90,-202,0,0,0}; 
+Servo Servo1, Servo2, Servo3, Servo4, Servo5, Servo6;
+float Eq1, Eq2, Eq3, Eq4;
+int x;
+bool ERROR_FLAG = false;
+
+int16_t calc_motor_3(float theta_3){
+  // The lenghts links in joint 3
+  const float a = 26.2;  const float b = 95;
+  const float c = 33;  const float d = 103.5;
+    /*
+    Serial.print("Theta_3: ");
+    Serial.println(theta_3);
+    Eq1 = (a*a - d*d + (b*b - 2*b*c*sin(theta_3) + c*c));
+    Eq2 = (2*a*sqrt(b*b - 2*b*c*sin(theta_3) + c*c));
+    Eq3 = c*cos(theta_3)/sqrt(b*b - 2*b*c*sin(theta_3) + c*c);
+    Eq4 = Eq1/Eq2;
+    float motor_2 = acos(Eq4) + asin(Eq3);
+    Serial.print("Eq1: ");
+    Serial.println(Eq1);
+    Serial.print("Eq2: ");
+    Serial.println(Eq2);
+    Serial.print("Eq3: ");
+    Serial.println(Eq3);
+    Serial.print("Eq4: ");
+    Serial.println(Eq4);
+    Serial.print("Motor_2: ");
+    Serial.println(motor_2);
+    */
+  float motor_2 =acos((a*a - d*d + (b*b - 2*b*c*sin(theta_3) + c*c))/(2*a*sqrt(b*b - 2*b*c*sin(theta_3) + c*c))) + asin(c*cos(theta_3)/sqrt(b*b - 2*b*c*sin(theta_3) + c*c));
+  return round(motor_2*180/PI);
+  }
+
+void update_motor(){
+  // First the data recieved is shown:
+  Serial.print(" Data recieved = [ ");
+  for(int i =0; i<6; i++){
+    Serial.print(String(data[i])); 
+    if(i<5) Serial.print(" , ");
+  }
+  Serial.println(" ]");
+  // Most of the motor_joints need the same values as the recieved data:
+  for(int i =0; i<6; i++){ 
+    motor_joints[i] = data[i]; 
+  }
+  data[1] = 90 + data[1];
+  // Motor-joint 3 is special, as it controls theta_3 through a link (system?).
+  // Theta_3 is actually representet in data[2], however in this calculation we are only looking at the local coordinates after theta_1's rotation.
+  float theta_3 = float(data[2]-data[1])*PI/180; //<-- The reason why theta_2 is removed here 
+  int16_t side_link_angle = calc_motor_3(theta_3); //side_link_angle is the angle there needs to be between link 2 and motor_3  
+  // Serial.println("Side Link Angle: ");
+  // Serial.println(side_link_angle);
+  motor_joints[1] = data[1] + 90; //Motor_joint[1] is offset by 90 so that the robot is upright when theta_2 = 0 is sent.
+  motor_joints[2] = side_link_angle + motor_joints[1]; //Motor_joints[2] needs to be the sum as side_link_angle shows the difference between links. 
+  Serial.print(" Motor angles = [ ");
+  for(int i =0; i<6; i++){
+    Serial.print(String(motor_joints[i])); 
+    if(i<5) Serial.print(" , ");
+  }
+  Serial.println(" ]");
+
+  // Calculate PWM: 
+  //Now the neccesary PWM value can be calculated. This does require that its known where to motor is located on the robot. 
+  //This is a constant value that we adjust through the vector. 
+  Serial.print(" Motor PWM = [ ");
+  for(int i =0; i<6; i++){ 
+    motor_pwm[i] = motor_joints[i] + offsets[i] + 90;
+    Serial.print(String(motor_pwm[i])); 
+    if(i<5) Serial.print(" , ");
+    //check to ensure the angles are good
+    if(motor_pwm[i]<0){
+      ERROR_FLAG = true; 
+      motor_pwm[i] = 0;
+    }else if(motor_pwm[i]>180){
+      ERROR_FLAG = true; 
+      motor_pwm[i] = 180; 
+    }
+  }
+  //if they are not good :(
+  Serial.println(" ]");
+  if(ERROR_FLAG){
+    Serial.println("ERROR: A data point was outside the 0-180 degree motor angle. I will cancel");
+    ERROR_FLAG = false; 
+    return; 
+  }
+
+  send_pwm(); 
+}
+
+void send_pwm(){
+  //
+  Servo1.write(motor_pwm[0]);  
+  Servo2.write(motor_pwm[1]);  
+  Servo3.write(motor_pwm[2]);  
+  Servo4.write(motor_pwm[3]);  
+  Servo5.write(motor_pwm[4]);  
+  Servo6.write(motor_pwm[5]);  
+}
+
+void setup() {
+  //attach all the servos to their pins and start them in their zero positions
+  Serial.begin(115200); 
+  Servo1.attach(2);
+  Servo1.write(90);
+
+  Servo2.attach(3);
+  Servo2.write(90);
+
+  Servo3.attach(4);
+  Servo3.write(90);
+
+  Servo4.attach(5);
+  Servo4.write(90);
+
+  Servo5.attach(6);
+  Servo5.write(90);
+
+  Servo6.attach(7);
+  Servo6.write(90);
+}
+
+  //This is where it recieves the data from Python, using the serial port.
+void loop() {
+  for (int i = 0; i < 6; i++)
+  {
+    while (!Serial.available());
+    delay(5);
+    String inputStr = Serial.readStringUntil('\n'); 
+    x = inputStr.toFloat();
+    data[i] = x;
+    Serial.print(data[i]);
+  }
+  Serial.println("Done");
+  update_motor();
+}
